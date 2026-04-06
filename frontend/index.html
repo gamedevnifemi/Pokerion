@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokerion</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Outfit:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="noise-overlay"></div>
+
+    <header>
+        <div class="logo">POKERION</div>
+        <nav>
+            <button class="tab active" data-tab="train">
+                <span class="tab-icon">&#9881;</span> Train
+            </button>
+            <button class="tab" data-tab="play">
+                <span class="tab-icon">&#9824;</span> Play
+            </button>
+            <button class="tab" data-tab="replay">
+                <span class="tab-icon">&#9654;</span> Replay
+            </button>
+        </nav>
+        <div class="header-accent"></div>
+    </header>
+
+    <main>
+        <!-- TRAIN TAB -->
+        <section id="train" class="tab-content active">
+            <div class="train-controls">
+                <div class="control-group">
+                    <label for="train-variant">Variant</label>
+                    <select id="train-variant">
+                        <option value="kuhn">Kuhn Poker</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="train-iterations">Iterations</label>
+                    <input type="number" id="train-iterations" value="1000" min="100" step="100">
+                </div>
+                <button id="train-btn">
+                    <span class="btn-text">Train Agent</span>
+                    <span class="btn-pulse"></span>
+                </button>
+                <span id="train-status"></span>
+            </div>
+
+            <div class="train-metrics">
+                <div class="metric">
+                    <span class="metric-label">Iterations</span>
+                    <span id="metric-iterations" class="metric-value">0</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Exploitability</span>
+                    <span id="metric-exploitability" class="metric-value">--</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">P1 Game Value</span>
+                    <span id="metric-game-value" class="metric-value">--</span>
+                </div>
+                <div class="metric target">
+                    <span class="metric-label">Nash Target</span>
+                    <span class="metric-value">-0.0556</span>
+                </div>
+            </div>
+
+            <div class="strategy-section">
+                <h2 class="section-title">Nash Equilibrium Strategy</h2>
+                <div class="charts-grid" id="strategy-charts"></div>
+            </div>
+
+            <div class="convergence-section">
+                <h2 class="section-title">Convergence</h2>
+                <div class="convergence-panel">
+                    <canvas id="convergence-chart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- PLAY TAB -->
+        <section id="play" class="tab-content">
+            <div class="play-controls">
+                <button id="play-new-game" class="play-btn primary">New Game</button>
+                <button id="play-new-hand" class="play-btn" disabled>Deal</button>
+                <span id="play-status"></span>
+                <div class="scoreboard">
+                    <span class="score-w">W: <span id="score-wins">0</span></span>
+                    <span class="score-l">L: <span id="score-losses">0</span></span>
+                </div>
+            </div>
+
+            <div class="felt-table">
+                <div class="felt-texture"></div>
+                <div class="table-rail"></div>
+
+                <div class="table-layout">
+                    <!-- Opponent -->
+                    <div class="seat seat-top">
+                        <div class="seat-badge">AGENT</div>
+                        <div class="card-area" id="opponent-cards"></div>
+                        <div class="agent-thought" id="agent-strategy-display"></div>
+                    </div>
+
+                    <!-- Center -->
+                    <div class="table-center">
+                        <div class="pot-display" id="pot-display">
+                            <div class="pot-chips"></div>
+                            <span class="pot-label">POT</span>
+                            <span class="pot-amount">0</span>
+                        </div>
+                        <div class="action-timeline" id="action-log"></div>
+                    </div>
+
+                    <!-- Human -->
+                    <div class="seat seat-bottom">
+                        <div class="card-area" id="human-cards"></div>
+                        <div class="seat-badge you">YOU</div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="action-panel" id="action-buttons"></div>
+
+                <!-- Result overlay -->
+                <div class="result-overlay" id="result-display"></div>
+            </div>
+        </section>
+
+        <!-- REPLAY TAB -->
+        <section id="replay" class="tab-content">
+            <div class="replay-controls">
+                <button id="replay-prev" class="replay-btn" disabled>&#8249; Prev</button>
+                <div class="replay-timeline">
+                    <div class="timeline-track">
+                        <div class="timeline-fill" id="replay-fill"></div>
+                    </div>
+                    <span id="replay-step">No replay loaded</span>
+                </div>
+                <button id="replay-next" class="replay-btn" disabled>Next &#8250;</button>
+            </div>
+
+            <div class="felt-table replay-table">
+                <div class="felt-texture"></div>
+                <div class="table-rail"></div>
+
+                <div class="table-layout">
+                    <div class="seat seat-top">
+                        <div class="seat-badge">P2</div>
+                        <div class="card-area" id="replay-p2-cards"></div>
+                    </div>
+
+                    <div class="table-center">
+                        <div class="pot-display" id="replay-pot">
+                            <span class="pot-label">POT</span>
+                            <span class="pot-amount">0</span>
+                        </div>
+                        <div class="action-timeline" id="replay-action-log"></div>
+                    </div>
+
+                    <div class="seat seat-bottom">
+                        <div class="card-area" id="replay-p1-cards"></div>
+                        <div class="seat-badge you">P1</div>
+                    </div>
+                </div>
+
+                <div class="replay-info-panel" id="replay-strategy"></div>
+                <div class="result-overlay" id="replay-result"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/components/cards.js"></script>
+    <script src="/js/components/strategy.js"></script>
+    <script src="/js/components/training.js"></script>
+    <script src="/js/components/table.js"></script>
+    <script src="/js/components/replay.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
