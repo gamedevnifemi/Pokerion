@@ -39,6 +39,11 @@ const API = {
         return res.json();
     },
 
+    async listSessions() {
+        const res = await fetch('/api/replay/sessions');
+        return res.json();
+    },
+
     connectTrainingWS() {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         return new WebSocket(`${proto}//${location.host}/api/ws/train`);

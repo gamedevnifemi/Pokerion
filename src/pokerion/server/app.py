@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +16,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def no_cache_frontend(request: Request, call_next):
+    """Stop the browser serving stale JS/CSS.
+
+    StaticFiles only sends etag/last-modified, which lets Chrome reuse a
+    memory-cached copy without revalidating — so edits to the frontend appear
+    to do nothing until a hard refresh. This is a dev server; never cache it.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith("/api"):
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+    return response
 
 # API routes
 app.include_router(training.router)

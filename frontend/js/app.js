@@ -28,4 +28,5 @@ document.addEventListener('DOMContentLoaded', () => {
     Training.init();
     Table.init();
     Replay.init();
+    Replay.restore(); // rebuild replay history from the server after a reload
 });

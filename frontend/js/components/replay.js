@@ -38,20 +38,55 @@ const Replay = {
 
     addHand(gameId, states, strategy) {
         const session = this._sessionById(gameId) || this._openSessionFor(gameId);
+        session.hands.push(this._makeHand(states, strategy, session.hands.length));
 
+        this.activeSessionIdx = this.sessions.indexOf(session);
+        this._selectHand(session.hands.length - 1);
+    },
+
+    // Rebuild history from the server after a page reload. The backend keeps
+    // every session for the life of the process, so nothing is really lost.
+    async restore() {
+        try {
+            const data = await API.listSessions();
+            if (!data.sessions?.length) return;
+
+            this.sessions = data.sessions.map((s, i) => ({
+                id: s.id,
+                label: `S${i + 1}`,
+                // Only completed hands — matches the live flow, where addHand
+                // fires on terminal. The in-progress hand is skipped.
+                hands: (s.hands || [])
+                    .filter(states => states.length && states[states.length - 1].is_terminal)
+                    .map((states, j) => this._makeHand(states, s.strategy, j)),
+            }));
+
+            this.activeSessionIdx = this.sessions.length - 1;
+            const session = this._activeSession();
+            if (session && session.hands.length) {
+                this._selectHand(session.hands.length - 1);
+            } else {
+                this.activeHandIdx = -1;
+                this._renderSessions();
+                this._renderHands();
+                this._updateControls();
+            }
+        } catch (e) {
+            console.warn('[Replay] could not restore history:', e);
+        }
+    },
+
+    _makeHand(states, strategy, index) {
         const terminal = states[states.length - 1];
-        session.hands.push({
-            id: `${session.hands.length + 1}`,
+        return {
+            id: `${index + 1}`,
             states,
             strategy: strategy || {},
             p0Card: terminal?.players?.[0]?.card || '?',
             p1Card: terminal?.players?.[1]?.card || '?',
             winner: terminal?.winner,
             actions: terminal?.action_history?.map(a => a.action).join('-') || '',
-        });
-
-        this.activeSessionIdx = this.sessions.indexOf(session);
-        this._selectHand(session.hands.length - 1);
+        };
     },
 
     // Full wipe — not used by the normal flow, kept for a hard reset.
@@ -80,9 +115,7 @@ const Replay = {
     // Safety net: a hand arriving for a session we never opened.
     _openSessionFor(gameId) {
         this.startSession(gameId);
-        const session = this.sessions[this.sessions.length - 1];
-        session.id = gameId;
-        return session;
+        return this.sessions[this.sessions.length - 1];
     },
 
     _clearHand() {
