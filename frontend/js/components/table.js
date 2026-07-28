@@ -18,11 +18,11 @@ const Table = {
         this.wins = 0;
         this.losses = 0;
         this._updateScore();
-        Replay.reset(); // drop hand chips from the previous session
 
         try {
             const result = await API.newGame('kuhn');
             this.gameId = result.game_id;
+            Replay.startSession(this.gameId); // new group; previous sessions stay browsable
             this.agentStrategy = null;
             this.lastCardState = null;
             this._clearResult();
@@ -54,7 +54,7 @@ const Table = {
             setTimeout(() => {
                 Cards.revealAll(document.getElementById('opponent-cards'));
             }, 200);
-            Replay.loadFromGame(this.gameId, result.replay, result.agent_strategy);
+            Replay.addHand(this.gameId, result.replay, result.agent_strategy);
         }
     },
 

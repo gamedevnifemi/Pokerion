@@ -1,89 +1,171 @@
-// Hand replay with step-through, timeline, and hand history
+// Hand replay with step-through, timeline, and history grouped by session.
+//
+// Two levels: a session (one "New Game" — a backend GameSession) contains many
+// hands. Selecting a session shows its hands; selecting a hand steps through it.
 
 const Replay = {
+    sessions: [],          // [{id, label, hands: [...]}]
+    activeSessionIdx: -1,
+    activeHandIdx: -1,
+
+    // The hand currently loaded into the replay table
     states: [],
     strategy: {},
     currentStep: 0,
-    gameId: null,
-
-    // Hand history
-    hands: [],       // [{id, states, strategy, p0Card, p1Card, winner, actions}]
-    activeHandIdx: -1,
 
     init() {
         document.getElementById('replay-prev').addEventListener('click', () => this.prev());
         document.getElementById('replay-next').addEventListener('click', () => this.next());
     },
 
-    // Drop every hand from the previous session. Called when a new game starts.
-    reset() {
-        this.hands = [];
-        this.states = [];
-        this.strategy = {};
-        this.currentStep = 0;
+    // Open a new session group. Called when a new game starts — previous
+    // sessions are kept and remain browsable.
+    startSession(gameId) {
+        this.sessions.push({
+            id: gameId,
+            label: `S${this.sessions.length + 1}`,
+            hands: [],
+        });
+        this.activeSessionIdx = this.sessions.length - 1;
         this.activeHandIdx = -1;
-        this.gameId = null;
 
-        this._renderHistory();
+        this._clearHand();
+        this._renderSessions();
+        this._renderHands();
         this._updateControls();
         this._clearTable();
     },
 
-    _clearTable() {
-        document.getElementById('replay-p1-cards').innerHTML = '';
-        document.getElementById('replay-p2-cards').innerHTML = '';
-        document.getElementById('replay-pot').querySelector('.pot-amount').textContent = '0';
-        document.getElementById('replay-action-log').innerHTML = '';
-        document.getElementById('replay-strategy').textContent = '';
+    addHand(gameId, states, strategy) {
+        const session = this._sessionById(gameId) || this._openSessionFor(gameId);
 
-        const resultEl = document.getElementById('replay-result');
-        resultEl.textContent = '';
-        resultEl.className = 'result-overlay';
-    },
-
-    loadFromGame(gameId, states, strategy) {
-        this.gameId = gameId; // real session id — hand.id below is just a display label
-
-        // Get terminal state for summary
         const terminal = states[states.length - 1];
-        const hand = {
-            id: `${this.hands.length + 1}`,
+        session.hands.push({
+            id: `${session.hands.length + 1}`,
             states,
             strategy: strategy || {},
             p0Card: terminal?.players?.[0]?.card || '?',
             p1Card: terminal?.players?.[1]?.card || '?',
             winner: terminal?.winner,
             actions: terminal?.action_history?.map(a => a.action).join('-') || '',
-        };
+        });
 
-        this.hands.push(hand);
-        this._renderHistory();
-        this._selectHand(this.hands.length - 1);
+        this.activeSessionIdx = this.sessions.indexOf(session);
+        this._selectHand(session.hands.length - 1);
+    },
+
+    // Full wipe — not used by the normal flow, kept for a hard reset.
+    reset() {
+        this.sessions = [];
+        this.activeSessionIdx = -1;
+        this.activeHandIdx = -1;
+
+        this._clearHand();
+        this._renderSessions();
+        this._renderHands();
+        this._updateControls();
+        this._clearTable();
+    },
+
+    // --- internals -------------------------------------------------------
+
+    _activeSession() {
+        return this.sessions[this.activeSessionIdx] || null;
+    },
+
+    _sessionById(gameId) {
+        return this.sessions.find(s => s.id === gameId) || null;
+    },
+
+    // Safety net: a hand arriving for a session we never opened.
+    _openSessionFor(gameId) {
+        this.startSession(gameId);
+        const session = this.sessions[this.sessions.length - 1];
+        session.id = gameId;
+        return session;
+    },
+
+    _clearHand() {
+        this.states = [];
+        this.strategy = {};
+        this.currentStep = 0;
+    },
+
+    _selectSession(idx) {
+        if (idx < 0 || idx >= this.sessions.length) return;
+
+        this.activeSessionIdx = idx;
+        const session = this.sessions[idx];
+
+        if (session.hands.length === 0) {
+            this.activeHandIdx = -1;
+            this._clearHand();
+            this._renderSessions();
+            this._renderHands();
+            this._updateControls();
+            this._clearTable();
+            return;
+        }
+        this._selectHand(session.hands.length - 1);
     },
 
     _selectHand(idx) {
-        if (idx < 0 || idx >= this.hands.length) return;
+        const session = this._activeSession();
+        if (!session || idx < 0 || idx >= session.hands.length) return;
 
         this.activeHandIdx = idx;
-        const hand = this.hands[idx];
+        const hand = session.hands[idx];
         this.states = hand.states;
         this.strategy = hand.strategy;
         this.currentStep = 0;
+
+        this._renderSessions();
+        this._renderHands();
         this._updateControls();
-        this._renderHistory();
         this.renderStep(false);
     },
 
-    _renderHistory() {
-        const container = document.getElementById('hand-history');
+    _renderSessions() {
+        const container = document.getElementById('session-history');
         container.innerHTML = '';
 
-        if (this.hands.length === 0) {
-            container.innerHTML = '<span class="history-empty">Play some hands first</span>';
+        if (this.sessions.length === 0) {
+            container.innerHTML = '<span class="history-empty">No sessions yet</span>';
             return;
         }
 
-        this.hands.forEach((hand, i) => {
+        this.sessions.forEach((session, i) => {
+            // TODO: `winner === 0` assumes the human is always player 0.
+            // Revisit once seat rotation lands and the state dict carries `viewer`.
+            const wins = session.hands.filter(h => h.winner === 0).length;
+            const losses = session.hands.length - wins;
+
+            const chip = document.createElement('button');
+            chip.className = 'session-chip';
+            if (i === this.activeSessionIdx) chip.classList.add('active');
+            chip.innerHTML =
+                `<span class="session-name">${session.label}</span>` +
+                `<span class="session-record">${wins}-${losses}</span>`;
+            chip.addEventListener('click', () => this._selectSession(i));
+            container.appendChild(chip);
+        });
+    },
+
+    _renderHands() {
+        const container = document.getElementById('hand-history');
+        container.innerHTML = '';
+
+        const session = this._activeSession();
+        if (!session) {
+            container.innerHTML = '<span class="history-empty">Play some hands first</span>';
+            return;
+        }
+        if (session.hands.length === 0) {
+            container.innerHTML = '<span class="history-empty">No hands in this session yet</span>';
+            return;
+        }
+
+        session.hands.forEach((hand, i) => {
             const chip = document.createElement('button');
             chip.className = 'hand-chip';
             if (i === this.activeHandIdx) chip.classList.add('active');
@@ -100,6 +182,20 @@ const Replay = {
             container.appendChild(chip);
         });
     },
+
+    _clearTable() {
+        document.getElementById('replay-p1-cards').innerHTML = '';
+        document.getElementById('replay-p2-cards').innerHTML = '';
+        document.getElementById('replay-pot').querySelector('.pot-amount').textContent = '0';
+        document.getElementById('replay-action-log').innerHTML = '';
+        document.getElementById('replay-strategy').textContent = '';
+
+        const resultEl = document.getElementById('replay-result');
+        resultEl.textContent = '';
+        resultEl.className = 'result-overlay';
+    },
+
+    // --- step-through ----------------------------------------------------
 
     prev() {
         if (this.currentStep > 0) {
