@@ -15,7 +15,35 @@ const Replay = {
         document.getElementById('replay-next').addEventListener('click', () => this.next());
     },
 
+    // Drop every hand from the previous session. Called when a new game starts.
+    reset() {
+        this.hands = [];
+        this.states = [];
+        this.strategy = {};
+        this.currentStep = 0;
+        this.activeHandIdx = -1;
+        this.gameId = null;
+
+        this._renderHistory();
+        this._updateControls();
+        this._clearTable();
+    },
+
+    _clearTable() {
+        document.getElementById('replay-p1-cards').innerHTML = '';
+        document.getElementById('replay-p2-cards').innerHTML = '';
+        document.getElementById('replay-pot').querySelector('.pot-amount').textContent = '0';
+        document.getElementById('replay-action-log').innerHTML = '';
+        document.getElementById('replay-strategy').textContent = '';
+
+        const resultEl = document.getElementById('replay-result');
+        resultEl.textContent = '';
+        resultEl.className = 'result-overlay';
+    },
+
     loadFromGame(gameId, states, strategy) {
+        this.gameId = gameId; // real session id — hand.id below is just a display label
+
         // Get terminal state for summary
         const terminal = states[states.length - 1];
         const hand = {
@@ -38,7 +66,6 @@ const Replay = {
 
         this.activeHandIdx = idx;
         const hand = this.hands[idx];
-        this.gameId = hand.id;
         this.states = hand.states;
         this.strategy = hand.strategy;
         this.currentStep = 0;

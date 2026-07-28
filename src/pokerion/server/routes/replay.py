@@ -9,7 +9,10 @@ router = APIRouter(prefix="/api/replay")
 
 @router.get("/{game_id}")
 async def get_replay(game_id: str):
-    """Get full hand history for step-through replay (god mode — shows all cards)."""
+    """Get the full session history for step-through replay (god mode — shows all cards).
+
+    `hands` is one state log per hand played, in the order they were dealt.
+    """
     session = app_state.games.get(game_id)
     if not session:
         return {"error": "Game not found"}
@@ -17,6 +20,6 @@ async def get_replay(game_id: str):
     return {
         "game_id": game_id,
         "variant": session.variant,
-        "states": session.get_replay(),
+        "hands": session.get_all_hands(),
         "strategy": session.strategy,
     }

@@ -22,7 +22,7 @@ class GameSession:
         self.variant = variant
         self.strategy = strategy
         self.history_cls = GAME_REGISTRY[variant]
-        self.states: list[dict] = []  # full replay log
+        self.hands: list[list[dict]] = []  # one state log per hand played
         self._start_new_hand()
 
     def _start_new_hand(self):
@@ -30,10 +30,11 @@ class GameSession:
         # Deal cards (sample chance)
         deal = root.sample_chance()
         self.current = root + deal
+        self.hands.append([])  # fresh log — hands do not share a state list
         self._log_state()
 
     def _log_state(self):
-        self.states.append(self.current.to_state_dict())
+        self.hands[-1].append(self.current.to_state_dict())
 
     def get_state(self, viewer: int | None = None) -> dict:
         return self.current.to_state_dict(viewer=viewer)
@@ -82,8 +83,12 @@ class GameSession:
         return self.get_state(viewer=self.human_player)
 
     def get_replay(self) -> list[dict]:
-        """Return all states with full information (god mode)."""
-        return self.states
+        """States for the current hand only, with full information (god mode)."""
+        return self.hands[-1]
+
+    def get_all_hands(self) -> list[list[dict]]:
+        """Every hand played this session, each as its own state log (god mode)."""
+        return self.hands
 
 
 class AppState:

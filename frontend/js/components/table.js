@@ -18,6 +18,7 @@ const Table = {
         this.wins = 0;
         this.losses = 0;
         this._updateScore();
+        Replay.reset(); // drop hand chips from the previous session
 
         try {
             const result = await API.newGame('kuhn');
