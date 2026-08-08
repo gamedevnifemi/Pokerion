@@ -13,3 +13,23 @@ env/
 *.json
 !frontend/**/*.json
 strategies/
+
+# Infrastructure — kept local, not committed.
+infra/
+
+# Local database
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# TLS material — the Origin CA pair lives on the box, never in git.
+# Blanket patterns on purpose: a key sitting in the repo root (it happens —
+# it did happen) must never be one `git add -A` away from a public repo.
+deploy/certs/
+*.key
+*.pem
+*.crt
+
+# Local-only test file
+tests/test_hardening.py
