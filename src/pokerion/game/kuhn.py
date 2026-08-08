@@ -137,6 +137,17 @@ class KuhnHistory(History):
         return KuhnHistory(cards=self._cards, actions=self._actions + (action,))
 
     def to_state_dict(self, viewer: Player | None = None) -> dict:
+        # Compute pot from actions
+        pot = 2  # antes
+        bets = [0, 0]
+        for idx, a in enumerate(self._actions):
+            acting = idx % 2
+            if a == "bet":
+                bets[acting] = 1
+            elif a == "call":
+                bets[acting] = 1
+        pot += sum(bets)
+
         players = []
         for i in range(2):
             card = None
@@ -148,19 +159,12 @@ class KuhnHistory(History):
             players.append({
                 "id": i,
                 "card": card,
-                "stack": 1,
+                # Chips this player has put into the pot this hand: ante + bets.
+                # Stacks across hands are match-level state and are injected by
+                # the Match, never invented here — this node must stay pure for
+                # the solver's sake.
+                "committed": 1 + bets[i],
             })
-
-        # Compute pot from actions
-        pot = 2  # antes
-        bets = [0, 0]
-        for idx, a in enumerate(self._actions):
-            acting = idx % 2
-            if a == "bet":
-                bets[acting] = 1
-            elif a == "call":
-                bets[acting] = 1
-        pot += sum(bets)
 
         action_history = []
         for idx, a in enumerate(self._actions):
@@ -177,6 +181,7 @@ class KuhnHistory(History):
 
         return {
             "variant": "kuhn",
+            "viewer": viewer,  # whose eyes this view is through; None = god mode
             "players": players,
             "pot": pot,
             "community_cards": [],
