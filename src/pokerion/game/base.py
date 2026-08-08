@@ -1,3 +1,8 @@
+# Required on Python < 3.14: `__add__` annotates its return type as History
+# from inside the History class body, which is evaluated eagerly before the
+# name exists. 3.14 defers annotation evaluation (PEP 649) and hides this.
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 from pokerion.common.types import Action, InfoSetKey, Player
