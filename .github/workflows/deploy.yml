@@ -1,0 +1,149 @@
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  IMAGE: ghcr.io/gamedevnifemi/pokerion
+  SITE_URL: https://pokerion.dev
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 is what the container ships; 3.14 is a common dev version.
+        # Testing only one hides version-dependent breakage — 3.14 defers
+        # annotation evaluation, so code that fails to import on 3.13 can
+        # look perfectly healthy locally.
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Test
+        run: pytest -q
+
+  build:
+    # PRs prove the production image builds; pushes to main also publish it.
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Login to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (and push on main)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      id-token: write   # the OIDC token
+      contents: read
+    env:
+      HAS_CONFIG: ${{ vars.DEPLOY_ROLE_ARN != '' && vars.INSTANCE_ID != '' }}
+    steps:
+      - name: Assume deploy role via OIDC
+        if: env.HAS_CONFIG == 'true'
+        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
+        with:
+          role-to-assume: ${{ vars.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy pinned image over SSM
+        if: env.HAS_CONFIG == 'true'
+        run: |
+          TAG="${IMAGE}:sha-${GITHUB_SHA}"
+
+          cat > params.json <<PARAMS
+          {
+            "commands": [
+              "set -euo pipefail",
+              "cd /opt/pokerion",
+              "runuser -u ec2-user -- git fetch --depth 1 origin ${GITHUB_SHA}",
+              "runuser -u ec2-user -- git checkout --force --detach ${GITHUB_SHA}",
+              "if grep -q '^IMAGE=' .env; then sed -i 's|^IMAGE=.*|IMAGE=${TAG}|' .env; else echo 'IMAGE=${TAG}' >> .env; fi",
+              "docker compose pull app",
+              "docker compose up -d --remove-orphans",
+              "docker system prune -f"
+            ]
+          }
+          PARAMS
+
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ vars.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "deploy ${GITHUB_SHA}" \
+            --parameters file://params.json \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: ${CMD_ID}"
+
+          for i in $(seq 1 30); do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id "${CMD_ID}" --instance-id "${{ vars.INSTANCE_ID }}" \
+              --query 'Status' --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation \
+                  --command-id "${CMD_ID}" --instance-id "${{ vars.INSTANCE_ID }}" \
+                  --query 'StandardErrorContent' --output text
+                exit 1 ;;
+              *) sleep 5 ;;
+            esac
+          done
+          aws ssm get-command-invocation \
+            --command-id "${CMD_ID}" --instance-id "${{ vars.INSTANCE_ID }}" \
+            --query 'StandardOutputContent' --output text
+
+      - name: Verify production runs this exact commit
+        if: env.HAS_CONFIG == 'true'
+        run: |
+          echo "Waiting for ${SITE_URL} to serve sha ${GITHUB_SHA}..."
+          for i in $(seq 1 18); do
+            LIVE=$(curl -fsS --max-time 10 "${SITE_URL}/api/version" | python3 -c 'import sys,json;print(json.load(sys.stdin)["sha"])' 2>/dev/null || echo none)
+            if [ "$LIVE" = "$GITHUB_SHA" ]; then
+              echo "healthy: production is running ${LIVE}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "production never reported ${GITHUB_SHA} (last saw: ${LIVE}) — deploy FAILED"
+          exit 1
+
+      - name: Skipped (no deploy config)
+        if: env.HAS_CONFIG != 'true'
+        run: echo "DEPLOY_ROLE_ARN/INSTANCE_ID variables not set — CI and image publish only."

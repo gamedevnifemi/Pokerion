@@ -28,5 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
     Training.init();
     Table.init();
     Replay.init();
-    Replay.restore(); // rebuild replay history from the server after a reload
+    // Rebuild from the server after a reload: history, and any match still in
+    // progress (without this the match is orphaned and unplayable).
+    Replay.restore();
+    Table.restore();
 });

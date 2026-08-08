@@ -1,7 +1,8 @@
-// Hand replay with step-through, timeline, and history grouped by session.
+// Hand replay with step-through, timeline, and history grouped by match.
 //
-// Two levels: a session (one "New Game" — a backend GameSession) contains many
-// hands. Selecting a session shows its hands; selecting a hand steps through it.
+// Two levels: a match (one "New Match") contains many hands. Selecting a match
+// shows its hands; selecting a hand steps through it. Backed by the server's
+// store, so history survives page reloads and server restarts.
 
 const Replay = {
     sessions: [],          // [{id, label, hands: [...]}]
@@ -18,12 +19,11 @@ const Replay = {
         document.getElementById('replay-next').addEventListener('click', () => this.next());
     },
 
-    // Open a new session group. Called when a new game starts — previous
-    // sessions are kept and remain browsable.
-    startSession(gameId) {
+    // Open a new match group. Previous matches stay browsable.
+    startSession(matchId) {
         this.sessions.push({
-            id: gameId,
-            label: `S${this.sessions.length + 1}`,
+            id: matchId,
+            label: `M${this.sessions.length + 1}`,
             hands: [],
         });
         this.activeSessionIdx = this.sessions.length - 1;
@@ -36,29 +36,25 @@ const Replay = {
         this._clearTable();
     },
 
-    addHand(gameId, states, strategy) {
-        const session = this._sessionById(gameId) || this._openSessionFor(gameId);
-        session.hands.push(this._makeHand(states, strategy, session.hands.length));
+    addHand(matchId, states, strategy, meta) {
+        const session = this._sessionById(matchId) || this._openSessionFor(matchId);
+        session.hands.push(this._makeHand(states, strategy, session.hands.length, meta));
 
         this.activeSessionIdx = this.sessions.indexOf(session);
         this._selectHand(session.hands.length - 1);
     },
 
-    // Rebuild history from the server after a page reload. The backend keeps
-    // every session for the life of the process, so nothing is really lost.
+    // Rebuild history from the server after a page reload.
     async restore() {
         try {
             const data = await API.listSessions();
             if (!data.sessions?.length) return;
 
-            this.sessions = data.sessions.map((s, i) => ({
-                id: s.id,
-                label: `S${i + 1}`,
-                // Only completed hands — matches the live flow, where addHand
-                // fires on terminal. The in-progress hand is skipped.
-                hands: (s.hands || [])
-                    .filter(states => states.length && states[states.length - 1].is_terminal)
-                    .map((states, j) => this._makeHand(states, s.strategy, j)),
+            this.sessions = data.sessions.map((m, i) => ({
+                id: m.id,
+                label: `M${i + 1}`,
+                hands: (m.hands || []).map((h, j) =>
+                    this._makeHand(h.states, h.strategy, j, h)),
             }));
 
             this.activeSessionIdx = this.sessions.length - 1;
@@ -76,7 +72,7 @@ const Replay = {
         }
     },
 
-    _makeHand(states, strategy, index) {
+    _makeHand(states, strategy, index, meta = {}) {
         const terminal = states[states.length - 1];
         return {
             id: `${index + 1}`,
@@ -84,9 +80,19 @@ const Replay = {
             strategy: strategy || {},
             p0Card: terminal?.players?.[0]?.card || '?',
             p1Card: terminal?.players?.[1]?.card || '?',
-            winner: terminal?.winner,
+            winnerSeat: meta.winner_seat ?? terminal?.winner,
+            // No `?? 0` default. Assuming seat 0 silently inverts the W/L dot
+            // on every rotated hand; null makes a missing value visible as
+            // "unknown" instead of confidently wrong.
+            humanSeat: meta.human_seat ?? null,
+            chipsDelta: meta.chips_delta,
             actions: terminal?.action_history?.map(a => a.action).join('-') || '',
         };
+    },
+
+    _humanWon(hand) {
+        if (hand.humanSeat === null || hand.winnerSeat === null) return null;
+        return hand.winnerSeat === hand.humanSeat;
     },
 
     // Full wipe — not used by the normal flow, kept for a hard reset.
@@ -108,13 +114,13 @@ const Replay = {
         return this.sessions[this.activeSessionIdx] || null;
     },
 
-    _sessionById(gameId) {
-        return this.sessions.find(s => s.id === gameId) || null;
+    _sessionById(matchId) {
+        return this.sessions.find(s => s.id === matchId) || null;
     },
 
-    // Safety net: a hand arriving for a session we never opened.
-    _openSessionFor(gameId) {
-        this.startSession(gameId);
+    // Safety net: a hand arriving for a match we never opened.
+    _openSessionFor(matchId) {
+        this.startSession(matchId);
         return this.sessions[this.sessions.length - 1];
     },
 
@@ -163,15 +169,14 @@ const Replay = {
         container.innerHTML = '';
 
         if (this.sessions.length === 0) {
-            container.innerHTML = '<span class="history-empty">No sessions yet</span>';
+            container.innerHTML = '<span class="history-empty">No matches yet</span>';
             return;
         }
 
         this.sessions.forEach((session, i) => {
-            // TODO: `winner === 0` assumes the human is always player 0.
-            // Revisit once seat rotation lands and the state dict carries `viewer`.
-            const wins = session.hands.filter(h => h.winner === 0).length;
-            const losses = session.hands.length - wins;
+            const judged = session.hands.filter(h => this._humanWon(h) !== null);
+            const wins = judged.filter(h => this._humanWon(h)).length;
+            const losses = judged.length - wins;
 
             const chip = document.createElement('button');
             chip.className = 'session-chip';
@@ -194,7 +199,7 @@ const Replay = {
             return;
         }
         if (session.hands.length === 0) {
-            container.innerHTML = '<span class="history-empty">No hands in this session yet</span>';
+            container.innerHTML = '<span class="history-empty">No hands in this match yet</span>';
             return;
         }
 
@@ -203,8 +208,9 @@ const Replay = {
             chip.className = 'hand-chip';
             if (i === this.activeHandIdx) chip.classList.add('active');
 
+            const won = this._humanWon(hand);
             const dot = document.createElement('span');
-            dot.className = `hand-result ${hand.winner === 0 ? 'w' : 'l'}`;
+            dot.className = `hand-result ${won === null ? 'u' : won ? 'w' : 'l'}`;
 
             const label = document.createElement('span');
             label.textContent = `#${hand.id} ${hand.p0Card}v${hand.p1Card}`;
@@ -252,7 +258,9 @@ const Replay = {
         const state = this.states[this.currentStep];
         const isFirst = this.currentStep === 0;
 
-        // Cards (god mode)
+        // Cards (god mode) — replay keeps engine-seat orientation: seat 0
+        // bottom, seat 1 top. Consistent across hands even as the human's
+        // seat rotates.
         const p0Card = state.players[0]?.card;
         const p1Card = state.players[1]?.card;
 
@@ -262,12 +270,11 @@ const Replay = {
             isFirst && animate,
         );
 
-        const p2Container = document.getElementById('replay-p2-cards');
-        if (state.is_terminal) {
-            Cards.renderToContainer(p2Container, p1Card ? [p1Card] : [], false);
-        } else {
-            Cards.renderToContainer(p2Container, p1Card ? [p1Card] : [], isFirst && animate);
-        }
+        Cards.renderToContainer(
+            document.getElementById('replay-p2-cards'),
+            p1Card ? [p1Card] : [],
+            isFirst && animate && !state.is_terminal,
+        );
 
         // Pot
         document.getElementById('replay-pot').querySelector('.pot-amount').textContent = state.pot;
@@ -310,8 +317,11 @@ const Replay = {
         } else if (state.is_terminal) {
             stratEl.textContent = 'Hand complete';
             if (state.winner !== null) {
+                const hand = this._activeSession()?.hands[this.activeHandIdx];
+                const humanWon = hand ? this._humanWon(hand) : null;
                 resultEl.textContent = `Player ${state.winner + 1} wins`;
-                resultEl.className = 'result-overlay ' + (state.winner === 0 ? 'win' : 'lose');
+                resultEl.className = 'result-overlay'
+                    + (humanWon === null ? '' : humanWon ? ' win' : ' lose');
             }
         } else {
             stratEl.textContent = '';

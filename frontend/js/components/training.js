@@ -33,19 +33,38 @@ const Training = {
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
 
+            if (data.type === 'started') {
+                status.textContent = `job ${data.job_id}...`;
+            }
+
             if (data.type === 'progress') {
                 this._updateMetrics(data);
                 this._updateConvergence(data);
 
-                if (Object.keys(StrategyCharts.charts).length === 0) {
-                    StrategyCharts.renderAll(data.strategy, 'strategy-charts');
-                } else {
-                    StrategyCharts.updateAll(data.strategy);
+                if (data.strategy) {
+                    if (Object.keys(StrategyCharts.charts).length === 0) {
+                        StrategyCharts.renderAll(data.strategy, 'strategy-charts');
+                    } else {
+                        StrategyCharts.updateAll(data.strategy);
+                    }
                 }
+            }
+
+            if (data.type === 'error') {
+                status.textContent = data.message;
+                btn.disabled = false;
+                this.ws.close();
             }
 
             if (data.type === 'done') {
                 status.textContent = `${data.iteration} iterations`;
+                if (data.strategy) {
+                    if (Object.keys(StrategyCharts.charts).length === 0) {
+                        StrategyCharts.renderAll(data.strategy, 'strategy-charts');
+                    } else {
+                        StrategyCharts.updateAll(data.strategy);
+                    }
+                }
                 btn.disabled = false;
                 this.ws.close();
             }

@@ -1,0 +1,18 @@
+{$DOMAIN} {
+	tls /certs/origin.pem /certs/origin.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /certs/cloudflare-origin-pull-ca.pem
+		}
+	}
+
+	encode gzip
+
+	request_body {
+		max_size 64KB
+	}
+
+	reverse_proxy app:8000 {
+		header_up X-Real-IP {http.request.header.CF-Connecting-IP}
+	}
+}
