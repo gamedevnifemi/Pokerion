@@ -13,29 +13,34 @@ const API = {
         return res.json();
     },
 
-    async newGame(variant = 'kuhn') {
-        const res = await fetch(`/api/game/new?variant=${variant}`, {
+    async newMatch(variant = 'kuhn', length = 50) {
+        const res = await fetch(`/api/match/new?variant=${variant}&length=${length}`, {
             method: 'POST',
         });
         return res.json();
     },
 
-    async takeAction(gameId, action) {
-        const res = await fetch(`/api/game/${gameId}/action?action=${action}`, {
+    async takeAction(matchId, action) {
+        const res = await fetch(`/api/match/${matchId}/action?action=${action}`, {
             method: 'POST',
         });
         return res.json();
     },
 
-    async newHand(gameId) {
-        const res = await fetch(`/api/game/${gameId}/new-hand`, {
+    async newHand(matchId) {
+        const res = await fetch(`/api/match/${matchId}/new-hand`, {
             method: 'POST',
         });
         return res.json();
     },
 
-    async getReplay(gameId) {
-        const res = await fetch(`/api/replay/${gameId}`);
+    async getMatchState(matchId) {
+        const res = await fetch(`/api/match/${matchId}/state`);
+        return res.json();
+    },
+
+    async getReplay(matchId) {
+        const res = await fetch(`/api/replay/${matchId}`);
         return res.json();
     },
 

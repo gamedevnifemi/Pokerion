@@ -83,13 +83,22 @@
         <!-- PLAY TAB -->
         <section id="play" class="tab-content">
             <div class="play-controls">
-                <button id="play-new-game" class="play-btn primary">New Game</button>
+                <div class="control-group inline">
+                    <label for="match-length">Hands</label>
+                    <input type="number" id="match-length" value="50" min="2" max="500" step="2">
+                </div>
+                <button id="play-new-match" class="play-btn primary">New Match</button>
                 <button id="play-new-hand" class="play-btn" disabled>Deal</button>
                 <span id="play-status"></span>
                 <div class="scoreboard">
                     <span class="score-w">W: <span id="score-wins">0</span></span>
                     <span class="score-l">L: <span id="score-losses">0</span></span>
                 </div>
+            </div>
+
+            <div class="match-bar">
+                <span id="match-progress"></span>
+                <span id="seat-indicator"></span>
             </div>
 
             <div class="felt-table">
@@ -99,7 +108,7 @@
                 <div class="table-layout">
                     <!-- Opponent -->
                     <div class="seat seat-top">
-                        <div class="seat-badge">AGENT</div>
+                        <div class="seat-badge">AGENT <span class="chips" id="agent-chips"></span></div>
                         <div class="card-area" id="opponent-cards"></div>
                         <div class="agent-thought" id="agent-strategy-display"></div>
                     </div>
@@ -117,7 +126,7 @@
                     <!-- Human -->
                     <div class="seat seat-bottom">
                         <div class="card-area" id="human-cards"></div>
-                        <div class="seat-badge you">YOU</div>
+                        <div class="seat-badge you">YOU <span class="chips" id="human-chips"></span></div>
                     </div>
                 </div>
 
@@ -126,6 +135,9 @@
 
                 <!-- Result overlay -->
                 <div class="result-overlay" id="result-display"></div>
+
+                <!-- End-of-match summary -->
+                <div class="match-summary" id="match-summary"></div>
             </div>
         </section>
 
