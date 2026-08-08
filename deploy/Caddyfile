@@ -1,9 +1,4 @@
 {$DOMAIN} {
-	# Origin CA cert only. Client-cert verification is deliberately not used:
-	# Cloudflare's origin-pull certificate is shared across all tenants, so it
-	# proves "this is Cloudflare" but not "this is our zone" — which the
-	# security group already enforces by IP. A secret header is the control
-	# that would actually add zone-level authentication.
 	tls /certs/origin.pem /certs/origin.key
 
 	encode gzip
