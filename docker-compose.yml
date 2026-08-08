@@ -21,7 +21,11 @@ services:
     environment:
       - DOMAIN=${DOMAIN}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory is mounted, not the Caddyfile itself. A single-file bind
+      # mount binds to an inode, and `git checkout` replaces the file rather
+      # than editing it — so the container would keep serving the original
+      # config forever and every Caddyfile change would silently do nothing.
+      - ./deploy/caddy:/etc/caddy:ro
       - ./deploy/certs:/certs:ro
       - caddy_data:/data
       - caddy_config:/config

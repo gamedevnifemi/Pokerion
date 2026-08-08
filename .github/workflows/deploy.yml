@@ -94,6 +94,9 @@ jobs:
         run: |
           TAG="${IMAGE}:sha-${GITHUB_SHA}"
 
+          # `up -d` only restarts containers whose service definition changed,
+          # so a Caddyfile-only edit needs an explicit reload. Caddy applies it
+          # gracefully, and refuses it (keeping the old config) if it is bad.
           cat > params.json <<PARAMS
           {
             "commands": [
@@ -104,6 +107,8 @@ jobs:
               "if grep -q '^IMAGE=' .env; then sed -i 's|^IMAGE=.*|IMAGE=${TAG}|' .env; else echo 'IMAGE=${TAG}' >> .env; fi",
               "docker compose pull app",
               "docker compose up -d --remove-orphans",
+              "sleep 5",
+              "docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile",
               "docker system prune -f"
             ]
           }
