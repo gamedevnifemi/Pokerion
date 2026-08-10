@@ -1078,3 +1078,80 @@ main { padding: 1.5rem 2rem; max-width: 1200px; margin: 0 auto; }
 /* Unknown outcome — the seat that played the hand was not recorded, so the
    result is genuinely unknowable rather than a loss. */
 .hand-chip .hand-result.u { background: var(--text-muted); }
+
+/* ===== NARROW SCREENS =====
+   Everything above is desktop-first and assumes a single header row plus a
+   wide felt table. These are the phone overrides. */
+@media (max-width: 640px) {
+    /* The nav alone is 322px, so logo and tabs cannot share a row. Stacking
+       them and splitting the width three ways also gives the tabs touch-sized
+       hit areas instead of the desktop text-sized ones. */
+    header {
+        flex-direction: column;
+        align-items: stretch;
+        height: auto;
+        gap: 0.6rem;
+        padding: 0.7rem 1rem;
+    }
+
+    .logo { font-size: 1.05rem; letter-spacing: 4px; text-align: center; }
+
+    nav { width: 100%; gap: 6px; }
+
+    .tab {
+        flex: 1;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 0.72rem 0.25rem;
+        font-size: 0.68rem;
+        letter-spacing: 0.5px;
+    }
+
+    main { padding: 1rem; }
+
+    /* Two metrics per row rather than one per row: min-width 160px plus the
+       desktop gap does not fit twice into a phone, so drop both. */
+    .train-metrics { gap: 0.5rem; }
+    .metric { flex: 1 1 calc(50% - 0.25rem); min-width: 0; padding: 0.75rem 1rem; }
+    .metric-value { font-size: 1.1rem; }
+
+    .charts-grid { grid-template-columns: 1fr; }
+
+    /* 3rem of side padding leaves almost nothing for the seats at this width.
+       The rail is a separate absolutely-positioned element, so its radius has
+       to be kept in step with the table's by hand. */
+    .felt-table { padding: 1.5rem 0.85rem; min-height: 340px; border-radius: 90px / 70px; }
+    .table-rail { border-radius: 90px / 70px; border-width: 6px; }
+    .table-layout { min-height: 290px; }
+
+    /* .scoreboard is pinned right with margin-left:auto, which on an unwrapped
+       row pushes the buttons off-screen. Give it a line of its own. */
+    .play-controls { flex-wrap: wrap; gap: 0.5rem; }
+    .scoreboard { margin-left: 0; width: 100%; }
+
+    .match-bar { flex-wrap: wrap; gap: 0.9rem; }
+
+    .replay-controls { flex-wrap: wrap; gap: 0.6rem; }
+    .replay-timeline { min-width: 0; width: 100%; }
+
+    .match-summary { padding: 1.25rem; gap: 0.9rem; }
+    .match-summary h3 { font-size: 1.25rem; }
+    .summary-grid { gap: 1.25rem; }
+}
+
+/* Hit areas are a question of pointer type, not width: a tablet in portrait is
+   768px wide and still driven by a fingertip, so keying these off a breakpoint
+   would leave it with the 32px text-sized buttons. Desktop sizing lands
+   everything at 27-41px, all under the 44px minimum. */
+@media (pointer: coarse) {
+    .tab,
+    .play-btn,
+    .replay-btn,
+    .session-chip,
+    #train-btn,
+    .control-group select,
+    .control-group input { min-height: 44px; }
+
+    /* The in-hand actions are the ones a misfire actually costs something. */
+    .action-btn { min-height: 48px; }
+}
