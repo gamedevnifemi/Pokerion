@@ -165,6 +165,30 @@ class TestThreePlayerPayoffs:
     def test_three_way_showdown(self):
         assert self.payoffs("JQA", "bet", "call", "call") == [-2.0, -2.0, 4.0]
 
+
+class TestShowdown:
+    """Who turns their cards over at the end, which is all an opponent gets to learn from."""
+
+    def test_everyone_still_in_shows_when_all_check(self):
+        assert play(KUHN_3P, "JQA", "check", "check", "check").showdown_players() == [0, 1, 2]
+        assert play(KUHN_2P, "KQ", "check", "check").showdown_players() == [0, 1]
+
+    def test_a_folded_hand_stays_hidden(self):
+        assert play(KUHN_3P, "JQA", "bet", "call", "fold").showdown_players() == [0, 1]
+        assert play(KUHN_3P, "JQA", "check", "bet", "fold", "call").showdown_players() == [0, 1]
+
+    def test_nobody_shows_when_the_bet_is_not_called(self):
+        assert play(KUHN_3P, "JQA", "bet", "fold", "fold").showdown_players() == []
+        assert play(KUHN_2P, "KQ", "bet", "fold").showdown_players() == []
+        assert play(KUHN_2P, "KQ", "check", "bet", "fold").showdown_players() == []
+
+    def test_a_called_bet_is_shown_down(self):
+        assert play(KUHN_2P, "KQ", "bet", "call").showdown_players() == [0, 1]
+
+    def test_asking_before_the_end_is_an_error(self):
+        with pytest.raises(ValueError, match="Not terminal"):
+            play(KUHN_3P, "JQA", "bet").showdown_players()
+
     def test_every_ending_is_zero_sum(self):
         for history in terminal_histories(KUHN_3P):
             assert sum(history.terminal_utility(seat) for seat in range(3)) == 0.0

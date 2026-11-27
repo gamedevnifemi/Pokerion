@@ -88,11 +88,21 @@ class GameTree:
         in the game's own order.
     legal
         Boolean ``(num_infosets, num_actions)``: which actions each row allows.
+    infoset_node
+        One node of each information set. Which one does not matter for anything
+        that depends only on the acting player's own choices, such as that
+        player's reach.
     infosets_share_depth
         True when all the nodes of each information set sit at the same depth.
         `pokerion.evaluation.best_response` relies on it.
     utilities
         ``(num_nodes, num_players)``: payoffs at terminal nodes, zero elsewhere.
+    showdown
+        Boolean ``(num_nodes, num_players)``: at a terminal node, the seats that
+        show their cards. All false where the hand ends without a showdown.
+    node_first_edge, node_edge_count
+        A node's outgoing edges are the ``node_edge_count[node]`` edges starting
+        at ``node_first_edge[node]``. Terminal nodes have none.
     edge_parent, edge_child
         The two ends of each edge.
     edge_owner
@@ -102,6 +112,9 @@ class GameTree:
     edge_slot
         For a player's edge, ``row * num_actions + column``: where its
         probability sits in a flattened strategy. Zero for a chance edge.
+    edge_action
+        What each edge stands for: the deal for a chance edge, the action name
+        for a player's edge. Adding these to the root in order rebuilds a hand.
     levels
         One slice of the edge arrays per depth, starting below the root.
     """
@@ -115,6 +128,7 @@ class GameTree:
         """
         self.variant = root.variant
         self.num_players = root.num_players
+        self._root = root
 
         # Step 1: walk the game one depth at a time, collecting plain lists.
         row_of: dict[InfoSetKey, int] = {}
@@ -123,12 +137,15 @@ class GameTree:
         infoset_player: list[int] = []
         infoset_actions: list[tuple[Action, ...]] = []
         infoset_depth: list[int] = []
+        infoset_node: list[int] = []
         same_depth = True
+        showdown_seats: dict[int, list[int]] = {}
 
         utilities: list[list[float]] = [[0.0] * self.num_players]
         parents: list[int] = []
         children: list[int] = []
         owners: list[int] = []
+        labels: list[Action] = []
         chance_probs: list[float] = []
         rows: list[int] = []
         columns: list[int] = []
@@ -144,6 +161,7 @@ class GameTree:
                     utilities[node] = [
                         float(history.terminal_utility(p)) for p in range(self.num_players)
                     ]
+                    showdown_seats[node] = history.showdown_players()
                     continue
 
                 if history.is_chance():
@@ -151,7 +169,7 @@ class GameTree:
                     total = sum(prob for _, prob in outcomes)
                     if abs(total - 1.0) > 1e-9:
                         raise ValueError(f"chance probabilities sum to {total} at {history!r}")
-                    moves = [(history + action, CHANCE, prob, 0, 0) for action, prob in outcomes]
+                    moves = [(action, CHANCE, prob, 0, 0) for action, prob in outcomes]
                 else:
                     player = history.active_player()
                     legal_here = tuple(history.actions())
@@ -165,6 +183,7 @@ class GameTree:
                         infoset_player.append(player)
                         infoset_actions.append(legal_here)
                         infoset_depth.append(depth)
+                        infoset_node.append(node)
                     elif infoset_player[row] != player or infoset_actions[row] != legal_here:
                         raise ValueError(
                             f"information set {key!r} is used for different players "
@@ -175,9 +194,9 @@ class GameTree:
                     moves = []
                     for action in legal_here:
                         column = column_of.setdefault(action, len(column_of))
-                        moves.append((history + action, player, 0.0, row, column))
+                        moves.append((action, player, 0.0, row, column))
 
-                for child_history, owner, prob, row, column in moves:
+                for action, owner, prob, row, column in moves:
                     child = len(utilities)
                     if child >= max_nodes:
                         raise ValueError(
@@ -187,10 +206,11 @@ class GameTree:
                     parents.append(node)
                     children.append(child)
                     owners.append(owner)
+                    labels.append(action)
                     chance_probs.append(prob)
                     rows.append(row)
                     columns.append(column)
-                    next_frontier.append((child, child_history))
+                    next_frontier.append((child, history + action))
 
             if len(parents) > level_start:
                 levels.append(slice(level_start, len(parents)))
@@ -205,6 +225,7 @@ class GameTree:
         self.num_infosets = len(infoset_keys)
         self.infoset_player = np.array(infoset_player, dtype=np.int64)
         self.infoset_actions = tuple(infoset_actions)
+        self.infoset_node = np.array(infoset_node, dtype=np.int64)
         self.infosets_share_depth = same_depth
 
         self.legal = np.zeros((self.num_infosets, self.num_actions), dtype=bool)
@@ -219,7 +240,16 @@ class GameTree:
         self.edge_slot = np.array(rows, dtype=np.int64) * self.num_actions + np.array(
             columns, dtype=np.int64
         )
+        self.edge_action: tuple[Action, ...] = tuple(labels)
         self.levels: tuple[slice, ...] = tuple(levels)
+
+        self.showdown = np.zeros((self.num_nodes, self.num_players), dtype=bool)
+        for node, seats in showdown_seats.items():
+            self.showdown[node, seats] = True
+
+        # Edges were added parent by parent, so each node's edges are contiguous.
+        self.node_edge_count = np.bincount(self.edge_parent, minlength=self.num_nodes)
+        self.node_first_edge = np.cumsum(self.node_edge_count) - self.node_edge_count
 
         self._row_of = row_of
         self._column_of = column_of
@@ -288,6 +318,30 @@ class GameTree:
         stacked = np.stack(strategies)
         return stacked[self.infoset_player, np.arange(self.num_infosets)]
 
+    def mixture(self, first: np.ndarray, second: np.ndarray, weight: float) -> np.ndarray:
+        """Play `second` for a whole hand with probability `weight`, otherwise `first`.
+
+        The choice is made once, before the hand, and kept to the end. The
+        result is the single strategy that behaves the same way. At each
+        information set it leans towards whichever of the two is more likely to
+        have brought the player there, so it is not the same as averaging the
+        two rows.
+
+        Because the choice is per hand, anything linear in a player's strategy
+        mixes in the same proportion: expected winnings, and the most an
+        opponent can gain against it.
+        """
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError(f"weight must be between 0 and 1, got {weight}")
+        seat, node = self.infoset_player, self.infoset_node
+        share_first = (1.0 - weight) * self.reach(first).players[seat, node]
+        share_second = weight * self.reach(second).players[seat, node]
+        total = (share_first + share_second)[:, None]
+        mixed = share_first[:, None] * first + share_second[:, None] * second
+        # An information set neither strategy ever reaches is never played: keep `first`.
+        reached = total > 0
+        return np.where(reached, mixed / np.where(reached, total, 1.0), first)
+
     # ---------------------------------------------------------------- passes
 
     def edge_probabilities(self, profile: np.ndarray) -> np.ndarray:
@@ -341,6 +395,39 @@ class GameTree:
         size = self.num_infosets * self.num_actions
         summed = np.bincount(self.edge_slot[edges], weights=values, minlength=size)
         return summed.reshape(self.num_infosets, self.num_actions)
+
+    def sample_play(self, profile: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+        """Play one hand at random under `profile`.
+
+        Returns the edges taken from the root to a terminal node, in order.
+        ``edge_child`` of the last one is where the hand ended.
+        """
+        flat = profile.ravel()
+        path = []
+        node = 0
+        while self.node_edge_count[node]:
+            first = self.node_first_edge[node]
+            edges = slice(first, first + self.node_edge_count[node])
+            if self.edge_owner[first] == CHANCE:
+                prob = self.edge_chance_prob[edges]
+            else:
+                prob = flat[self.edge_slot[edges]]
+            cumulative = np.cumsum(prob)
+            pick = np.searchsorted(cumulative, rng.random() * cumulative[-1], side="right")
+            edge = first + min(int(pick), len(cumulative) - 1)
+            path.append(edge)
+            node = self.edge_child[edge]
+        return np.array(path, dtype=np.int64)
+
+    def replay(self, played: np.ndarray) -> History:
+        """The `History` at the end of a played hand, such as one from `sample_play`.
+
+        Use it to show a hand to a person: the cards, the betting and the result.
+        """
+        history = self._root
+        for edge in played:
+            history = history + self.edge_action[edge]
+        return history
 
     def __repr__(self) -> str:
         return (

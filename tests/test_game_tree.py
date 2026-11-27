@@ -159,6 +159,116 @@ class TestPasses:
         assert (counts[~kuhn.legal] == 0).all()
 
 
+class TestNodes:
+    def test_each_nodes_edges_are_one_contiguous_run(self, kuhn3):
+        for node in range(kuhn3.num_nodes):
+            first, count = kuhn3.node_first_edge[node], kuhn3.node_edge_count[node]
+            assert (kuhn3.edge_parent[first:first + count] == node).all()
+        assert kuhn3.node_edge_count.sum() == len(kuhn3.edge_parent)
+
+    def test_endings_have_no_edges(self, kuhn):
+        is_ending = np.ones(kuhn.num_nodes, dtype=bool)
+        is_ending[kuhn.edge_parent] = False
+        assert (kuhn.node_edge_count[is_ending] == 0).all()
+        assert (kuhn.node_edge_count[~is_ending] > 0).all()
+
+    def test_each_information_set_names_one_of_its_own_nodes(self, kuhn3):
+        for row, node in enumerate(kuhn3.infoset_node):
+            first = kuhn3.node_first_edge[node]
+            assert kuhn3.edge_slot[first] // kuhn3.num_actions == row
+            assert kuhn3.edge_owner[first] == kuhn3.infoset_player[row]
+
+    def test_showdown_marks_the_seats_that_show_their_cards(self, kuhn):
+        is_ending = kuhn.node_edge_count == 0
+        shown = kuhn.showdown[is_ending].sum(axis=1)
+        # Of the 5 ways a hand ends, 2 are folds (nobody shows) and 3 are showdowns (both show).
+        assert sorted(np.unique(shown).tolist()) == [0, 2]
+        assert (shown == 2).sum() == 6 * 3
+        assert not kuhn.showdown[~is_ending].any()
+
+
+class TestSamplePlay:
+    def test_a_played_hand_runs_from_the_root_to_an_ending(self, kuhn3):
+        rng = np.random.default_rng(6)
+        strategy = random_strategy(kuhn3, rng)
+        for _ in range(50):
+            played = kuhn3.sample_play(strategy, rng)
+            assert kuhn3.edge_parent[played[0]] == 0
+            assert (kuhn3.edge_child[played[:-1]] == kuhn3.edge_parent[played[1:]]).all()
+            assert kuhn3.node_edge_count[kuhn3.edge_child[played[-1]]] == 0
+
+    def test_endings_come_up_as_often_as_their_reach_says(self, kuhn):
+        rng = np.random.default_rng(7)
+        strategy = random_strategy(kuhn, rng)
+        seen = np.zeros(kuhn.num_nodes)
+        samples = 6000
+        for _ in range(samples):
+            seen[kuhn.edge_child[kuhn.sample_play(strategy, rng)[-1]]] += 1
+        expected = kuhn.reach(strategy).total() * (kuhn.node_edge_count == 0)
+        assert np.abs(seen / samples - expected).max() < 0.02
+
+    def test_never_takes_an_action_with_zero_probability(self, kuhn):
+        rng = np.random.default_rng(8)
+        always_check_or_fold = kuhn.strategy_from_dict(
+            {key: {a: float(a in ("check", "fold")) for a in kuhn.infoset_actions[kuhn.row(key)]}
+             for key in kuhn.infoset_keys}
+        )
+        for _ in range(200):
+            played = kuhn.sample_play(always_check_or_fold, rng)
+            taken = [kuhn.actions[kuhn.edge_slot[e] % kuhn.num_actions]
+                     for e in played if kuhn.edge_owner[e] != CHANCE]
+            assert taken == ["check", "check"]
+
+
+class TestMixture:
+    def test_endpoints_play_like_the_originals(self, kuhn3):
+        rng = np.random.default_rng(9)
+        first, second = random_strategy(kuhn3, rng), random_strategy(kuhn3, rng)
+        assert np.allclose(kuhn3.mixture(first, second, 0.0), first)
+        assert np.allclose(kuhn3.mixture(first, second, 1.0), second)
+
+    def test_mixture_is_a_valid_strategy(self, kuhn3):
+        rng = np.random.default_rng(10)
+        mixed = kuhn3.mixture(random_strategy(kuhn3, rng), random_strategy(kuhn3, rng), 0.3)
+        kuhn3.check_strategy(mixed)
+
+    @pytest.mark.parametrize("seat", [0, 1, 2])
+    def test_payoffs_mix_in_the_same_proportion(self, kuhn3, seat):
+        # Choosing one of two strategies per hand mixes every seat's expected payoff linearly.
+        rng = np.random.default_rng(11 + seat)
+        base, other = random_strategy(kuhn3, rng), random_strategy(kuhn3, rng)
+        rows = kuhn3.infoset_player == seat
+
+        def with_seat_playing(strategy):
+            profile = base.copy()
+            profile[rows] = strategy[rows]
+            return kuhn3.expected_utilities(profile)
+
+        weight = 0.3
+        mixed = with_seat_playing(kuhn3.mixture(base, other, weight))
+        expected = (1 - weight) * with_seat_playing(base) + weight * with_seat_playing(other)
+        assert mixed == pytest.approx(expected, abs=1e-12)
+
+    def test_it_is_not_the_same_as_averaging_each_decision(self, kuhn):
+        always_bet = kuhn.strategy_from_dict(
+            {key: {a: float(a in ("bet", "call")) for a in kuhn.infoset_actions[kuhn.row(key)]}
+             for key in kuhn.infoset_keys}
+        )
+        never_bet = kuhn.strategy_from_dict(
+            {key: {a: float(a in ("check", "fold")) for a in kuhn.infoset_actions[kuhn.row(key)]}
+             for key in kuhn.infoset_keys}
+        )
+        mixed = kuhn.mixture(never_bet, always_bet, 0.5)
+        # After checking first, the player must be the one who never bets, so it folds to a bet.
+        assert mixed[kuhn.row("K|check:bet"), kuhn.column("fold")] == pytest.approx(1.0)
+        averaged = 0.5 * never_bet + 0.5 * always_bet
+        assert averaged[kuhn.row("K|check:bet"), kuhn.column("fold")] == 0.5
+
+    def test_rejects_a_weight_outside_zero_to_one(self, kuhn):
+        with pytest.raises(ValueError, match="between 0 and 1"):
+            kuhn.mixture(kuhn.uniform_strategy(), kuhn.uniform_strategy(), -0.1)
+
+
 class TestGuards:
     def test_refuses_a_game_that_is_too_large(self):
         with pytest.raises(ValueError, match="too large"):

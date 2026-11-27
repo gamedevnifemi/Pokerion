@@ -209,6 +209,14 @@ class KuhnHistory(History):
             return float(sum(chips) - chips[player])  # the pot, less what they paid in
         return float(-chips[player])
 
+    def showdown_players(self) -> list[Player]:
+        if not self.is_terminal():
+            raise ValueError(f"Not terminal: {self._actions}")
+        _, live = self._chips_and_live_seats()
+        still_in = [seat for seat, in_hand in enumerate(live) if in_hand]
+        # With one player left there is nothing to compare, so no card is shown.
+        return still_in if len(still_in) > 1 else []
+
     # ------------------------------------------------------------- knowledge
 
     def info_set_key(self) -> InfoSetKey:

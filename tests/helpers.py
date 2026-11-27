@@ -59,6 +59,9 @@ class BiasedCoin(History):
         won = self._guess.upper() == self._coin
         return (1.0 if won else -1.0) * (1.0 if player == 0 else -1.0)
 
+    def showdown_players(self) -> list[Player]:
+        return []
+
     def active_player(self) -> Player:
         return 0
 
