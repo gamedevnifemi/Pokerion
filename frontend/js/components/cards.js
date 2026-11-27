@@ -4,6 +4,7 @@ const SUIT_MAP = {
     J: { suit: '\u2660', name: 'spade' },   // Jack of Spades
     Q: { suit: '\u2665', name: 'heart' },    // Queen of Hearts
     K: { suit: '\u2666', name: 'diamond' },  // King of Diamonds
+    A: { suit: '\u2663', name: 'club' },     // Ace of Clubs (three-player Kuhn)
 };
 
 const Cards = {

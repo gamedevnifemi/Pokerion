@@ -29,6 +29,10 @@
             <button class="tab" data-tab="replay">
                 <span class="tab-icon">&#9654;</span> Replay
             </button>
+            <!-- Shown by lab.js only when the server has the lab switched on. -->
+            <button class="tab" data-tab="lab" id="lab-tab" hidden>
+                <span class="tab-icon">&#9878;</span> Lab
+            </button>
         </nav>
         <div class="header-accent"></div>
     </header>
@@ -196,6 +200,77 @@
                 <div class="result-overlay" id="replay-result"></div>
             </div>
         </section>
+
+        <!-- LAB TAB -->
+        <section id="lab" class="tab-content">
+            <p class="lab-intro">
+                Seat bots at a table and watch a match between them. Every hand is scored by
+                what each player expected to win, so no card decides the result. One hand is
+                still dealt each time, and that hand is all an adapting agent gets to learn from.
+            </p>
+
+            <form class="lab-setup" id="lab-setup">
+                <div class="control-group">
+                    <label for="lab-game">Game</label>
+                    <select id="lab-game"></select>
+                </div>
+                <div class="lab-players" id="lab-players"></div>
+                <div class="control-group">
+                    <label for="lab-hands">Hands</label>
+                    <input type="number" id="lab-hands" value="300" min="1" step="1">
+                </div>
+                <div class="control-group">
+                    <label for="lab-reveal">Cards shown after a hand</label>
+                    <select id="lab-reveal">
+                        <option value="all">Every card</option>
+                        <option value="showdown">Only cards in a showdown</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="lab-seed">Seed</label>
+                    <input type="number" id="lab-seed" value="0" step="1">
+                </div>
+                <button type="submit" id="lab-run" class="play-btn primary">Play match</button>
+                <span id="lab-status" role="status"></span>
+            </form>
+
+            <div id="lab-results" hidden>
+                <h2 class="section-title">The score</h2>
+                <p class="lab-caption">
+                    Chips per hand for each player, averaged over the last 24 hands. A dashed
+                    line marks what the adapting agent would win if it never adapted, and
+                    another marks the most anyone could win in its place. Click the chart to
+                    jump to a hand.
+                </p>
+                <div class="lab-score">
+                    <div class="convergence-panel lab-chart">
+                        <canvas id="lab-chart"></canvas>
+                    </div>
+                    <div class="lab-ledger" id="lab-ledger"></div>
+                </div>
+
+                <h2 class="section-title">The hand that was dealt</h2>
+                <p class="lab-caption">
+                    The cards and betting of one hand. A card marked hidden was never turned
+                    over, so the other players learned nothing from it.
+                </p>
+                <div class="lab-scrubber">
+                    <button type="button" class="replay-btn" id="lab-prev">&#8249; Prev</button>
+                    <input type="range" id="lab-hand" min="1" max="1" value="1" aria-label="Hand number">
+                    <button type="button" class="replay-btn" id="lab-next">Next &#8250;</button>
+                    <button type="button" class="replay-btn" id="lab-play">Play through</button>
+                    <span id="lab-hand-label"></span>
+                </div>
+                <div class="lab-table" id="lab-table"></div>
+                <p class="lab-outcome" id="lab-outcome"></p>
+
+                <div id="lab-beliefs-section">
+                    <h2 class="section-title">What the agent believed</h2>
+                    <p class="lab-caption" id="lab-beliefs-caption"></p>
+                    <div class="lab-beliefs" id="lab-beliefs"></div>
+                </div>
+            </div>
+        </section>
     </main>
 
     <script src="/js/api.js"></script>
@@ -204,6 +279,7 @@
     <script src="/js/components/training.js"></script>
     <script src="/js/components/table.js"></script>
     <script src="/js/components/replay.js"></script>
+    <script src="/js/components/lab.js"></script>
     <script src="/js/app.js"></script>
 </body>
 </html>

@@ -32,4 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // progress (without this the match is orphaned and unplayable).
     Replay.restore();
     Table.restore();
+    // Shows its own tab if the server has the lab switched on.
+    Lab.init();
 });

@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pokerion.server.jobs import TrainingJobExecutor
 from pokerion.server.repository import Repository
-from pokerion.server.routes import match, replay, training
+from pokerion.server.routes import lab, match, replay, training
 from pokerion.server.session import SessionMiddleware
 from pokerion.server.state import GAME_REGISTRY, app_state
 from pokerion.training.runner import TrainingRunner
@@ -106,6 +106,8 @@ async def version():
 app.include_router(training.router)
 app.include_router(match.router)
 app.include_router(replay.router)
+# Always mounted, but every lab route answers 404 unless POKERION_LAB is set.
+app.include_router(lab.router)
 
 # Serve frontend static files. The env override exists because an installed
 # package's __file__ lives in site-packages, nowhere near the repo layout.
