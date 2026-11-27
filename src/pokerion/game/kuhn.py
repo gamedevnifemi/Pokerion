@@ -1,200 +1,275 @@
-"""Kuhn Poker — the simplest non-trivial poker game.
+"""Kuhn poker — the simplest non-trivial poker game, for two or more players.
 
-Rules:
-- 3 cards: J (0), Q (1), K (2)
-- 2 players, each antes 1 chip
-- Each dealt 1 card
-- Player 0 acts first: check or bet(1)
-- Player 1 responds: check/bet or call/fold
-- If player 0 checked and player 1 bet, player 0 can call or fold
-- Showdown: higher card wins the pot
+Rules, for any number of players:
+- Every player antes 1 chip and is dealt one card from a small deck.
+- Players act in seat order. Until someone bets, a player may check or bet 1 chip.
+- Once someone has bet, each other player in turn may call for 1 chip or fold.
+  There is no raising, so nobody acts more than twice.
+- The hand ends when everyone has checked, or when everyone after the bettor
+  has called or folded. The highest card among the players still in wins the pot.
 
-12 information sets, known analytical Nash equilibrium (game value = -1/18).
+Two standard games are defined here:
+- KUHN_2P: the deck J Q K. 12 information sets. At equilibrium the first
+  player loses 1/18 of a chip per hand.
+- KUHN_3P: the deck J Q K A. 48 information sets. There is no single
+  equilibrium value with three players: see Szafron, Gibson and Sturtevant,
+  "A Parameterized Family of Equilibrium Profiles for Three-Player Kuhn Poker"
+  (AAMAS 2013).
+
+Other decks and player counts are made with KuhnRules.
 """
 
+from __future__ import annotations
+
 import random
+from dataclasses import dataclass
+from functools import cache
 from itertools import permutations
 
 from pokerion.common.types import Action, InfoSetKey, Player
 from pokerion.game.base import History
 
+# The standard two-player deck, lowest card first. Kept as a module-level name
+# because callers and tests import it.
 CARDS = ["J", "Q", "K"]
-CARD_RANK = {"J": 0, "Q": 1, "K": 2}
+
+# Characters that separate cards and actions inside deal strings and
+# information set keys, so they cannot appear in a card name.
+_RESERVED_CHARACTERS = ",|:"
+
+
+@cache
+def _rank_of(deck: tuple[str, ...]) -> dict[str, int]:
+    return {card: rank for rank, card in enumerate(deck)}
+
+
+@dataclass(frozen=True)
+class KuhnRules:
+    """Which Kuhn game is being played: how many players, and with which deck.
+
+    `deck` lists the cards from lowest to highest. A card's position in the
+    deck is its rank, so the names are only labels.
+    """
+
+    num_players: int = 2
+    deck: tuple[str, ...] = ("J", "Q", "K")
+
+    def __post_init__(self):
+        if self.num_players < 2:
+            raise ValueError("Kuhn poker needs at least two players")
+        if len(self.deck) <= self.num_players:
+            raise ValueError(
+                f"{self.num_players} players need a deck of at least "
+                f"{self.num_players + 1} cards, got {len(self.deck)}"
+            )
+        if len(set(self.deck)) != len(self.deck):
+            raise ValueError("card names must be unique")
+        for card in self.deck:
+            if not card or any(ch in _RESERVED_CHARACTERS for ch in card):
+                raise ValueError(
+                    f"card name {card!r} is empty or contains one of {_RESERVED_CHARACTERS!r}"
+                )
+
+    def root(self) -> KuhnHistory:
+        """The start of a hand, before the cards are dealt."""
+        return KuhnHistory(rules=self)
+
+    def rank(self, card: str) -> int:
+        """Strength of a card: 0 for the lowest card in the deck."""
+        return _rank_of(self.deck)[card]
+
+    def encode_deal(self, cards: tuple[str, ...]) -> Action:
+        """The chance action that deals `cards`, one to each seat in seat order.
+
+        Decks of one-character names give compact strings such as "KQ", which
+        is the form already stored in saved replays. Longer names are joined
+        with commas.
+        """
+        return self._deal_separator.join(cards)
+
+    def decode_deal(self, action: Action) -> tuple[str, ...]:
+        """Inverse of encode_deal."""
+        if self._deal_separator:
+            return tuple(action.split(self._deal_separator))
+        return tuple(action)
+
+    @property
+    def _deal_separator(self) -> str:
+        return "" if all(len(card) == 1 for card in self.deck) else ","
+
+
+KUHN_2P = KuhnRules()
+KUHN_3P = KuhnRules(num_players=3, deck=("J", "Q", "K", "A"))
 
 
 class KuhnHistory(History):
-    """Immutable game tree node for Kuhn Poker.
+    """Immutable game tree node for Kuhn poker.
 
-    Internal encoding:
-        cards: tuple of 2 cards dealt (cards[0] = player 0's card)
-        actions: tuple of player actions taken so far ("check", "bet", "call", "fold")
+    cards:   the card dealt to each seat; empty before the deal
+    actions: the betting actions so far ("check", "bet", "call", "fold")
+    rules:   which Kuhn game this is; the standard two-player game by default
+
+    Players act in a fixed cycle and nobody is ever skipped, so the k-th
+    betting action is always taken by seat ``k % num_players``.
     """
 
     def __init__(
         self,
         cards: tuple[str, ...] = (),
         actions: tuple[str, ...] = (),
+        rules: KuhnRules = KUHN_2P,
     ):
         self._cards = cards
         self._actions = actions
+        self._rules = rules
+        # Position of the bet in the action sequence, or None while everyone
+        # has checked. Everything before it is a check; everything after it is
+        # a call or a fold.
+        self._bet_at = actions.index("bet") if "bet" in actions else None
+
+    @property
+    def rules(self) -> KuhnRules:
+        return self._rules
 
     @property
     def variant(self) -> str:
-        return "kuhn"
+        if self._rules == KUHN_2P:
+            return "kuhn"
+        return f"kuhn-{self._rules.num_players}p-{len(self._rules.deck)}c"
 
     @property
     def num_players(self) -> int:
-        return 2
+        return self._rules.num_players
+
+    # ---------------------------------------------------------------- chance
 
     def is_chance(self) -> bool:
-        return len(self._cards) < 2
+        return len(self._cards) < self._rules.num_players
 
     def chance_actions(self) -> list[tuple[Action, float]]:
-        if len(self._cards) == 0:
-            # Deal both cards at once — all 6 permutations of 2 from 3
-            deals = list(permutations(CARDS, 2))
-            prob = 1.0 / len(deals)
-            return [(f"{a}{b}", prob) for a, b in deals]
-        # Should not be called if cards are already dealt
-        return []
+        if not self.is_chance():
+            return []
+        # Every seat is dealt at once: one outcome per ordered choice of cards.
+        deals = list(permutations(self._rules.deck, self._rules.num_players))
+        prob = 1.0 / len(deals)
+        return [(self._rules.encode_deal(deal), prob) for deal in deals]
 
     def sample_chance(self) -> Action:
-        if len(self._cards) == 0:
-            a, b = random.sample(CARDS, 2)
-            return f"{a}{b}"
-        return ""
+        if not self.is_chance():
+            return ""
+        deal = random.sample(self._rules.deck, self._rules.num_players)
+        return self._rules.encode_deal(tuple(deal))
+
+    # --------------------------------------------------------------- betting
 
     def is_terminal(self) -> bool:
-        if len(self._cards) < 2:
+        if self.is_chance():
             return False
-        a = self._actions
-        # Both check -> showdown
-        if a == ("check", "check"):
-            return True
-        # Bet then fold
-        if len(a) >= 2 and a[-1] == "fold":
-            return True
-        # Bet then call
-        if len(a) >= 2 and a[-2] == "bet" and a[-1] == "call":
-            return True
-        return False
-
-    def terminal_utility(self, player: Player) -> float:
-        a = self._actions
-        p0_card = CARD_RANK[self._cards[0]]
-        p1_card = CARD_RANK[self._cards[1]]
-        winner = 0 if p0_card > p1_card else 1
-
-        if a == ("check", "check"):
-            # Pot = 2 (1 ante each). Winner gains 1.
-            return 1.0 if player == winner else -1.0
-
-        if a == ("bet", "fold"):
-            # Player 0 bet, player 1 folded. Player 0 wins pot of 2.
-            return 1.0 if player == 0 else -1.0
-
-        if a == ("bet", "call"):
-            # Pot = 4. Winner gains 2.
-            return 2.0 if player == winner else -2.0
-
-        if a == ("check", "bet", "fold"):
-            # Player 0 checked, player 1 bet, player 0 folded. Player 1 wins.
-            return 1.0 if player == 1 else -1.0
-
-        if a == ("check", "bet", "call"):
-            # Pot = 4. Showdown.
-            return 2.0 if player == winner else -2.0
-
-        raise ValueError(f"Not terminal: {a}")
+        n = self._rules.num_players
+        if self._bet_at is None:
+            return len(self._actions) == n  # everyone checked
+        # After a bet, each of the other n - 1 players answers exactly once.
+        return len(self._actions) - self._bet_at - 1 == n - 1
 
     def active_player(self) -> Player:
-        # After deal, player 0 acts on even action counts, player 1 on odd
-        return len(self._actions) % 2
+        return len(self._actions) % self._rules.num_players
 
     def actions(self) -> list[Action]:
-        if len(self._actions) == 0:
-            # Player 0's first action
+        if self.is_chance() or self.is_terminal():
+            return []
+        if self._bet_at is None:
             return ["check", "bet"]
-        last = self._actions[-1]
-        if last == "check" and len(self._actions) == 1:
-            # Player 1 after player 0 checked
-            return ["check", "bet"]
-        if last == "bet":
-            # Facing a bet: call or fold
-            return ["call", "fold"]
-        return []
+        return ["call", "fold"]
+
+    def _chips_and_live_seats(self) -> tuple[list[int], list[bool]]:
+        """Chips each seat has put in, and which seats have not folded."""
+        n = self._rules.num_players
+        chips = [1] * n  # the antes
+        live = [True] * n
+        for k, action in enumerate(self._actions):
+            seat = k % n
+            if action in ("bet", "call"):
+                chips[seat] += 1
+            elif action == "fold":
+                live[seat] = False
+        return chips, live
+
+    def _winner(self, live: list[bool]) -> Player:
+        """The seat holding the highest card among those still in."""
+        return max(
+            (seat for seat, still_in in enumerate(live) if still_in),
+            key=lambda seat: self._rules.rank(self._cards[seat]),
+        )
+
+    def terminal_utility(self, player: Player) -> float:
+        if not self.is_terminal():
+            raise ValueError(f"Not terminal: {self._actions}")
+        chips, live = self._chips_and_live_seats()
+        if player == self._winner(live):
+            return float(sum(chips) - chips[player])  # the pot, less what they paid in
+        return float(-chips[player])
+
+    # ------------------------------------------------------------- knowledge
 
     def info_set_key(self) -> InfoSetKey:
-        player = self.active_player()
-        card = self._cards[player]
-        action_str = ":".join(self._actions) if self._actions else ""
-        return f"{card}|{action_str}" if action_str else card
+        card = self._cards[self.active_player()]
+        if not self._actions:
+            return card
+        return f"{card}|{':'.join(self._actions)}"
 
-    def __add__(self, action: Action) -> "KuhnHistory":
+    def __add__(self, action: Action) -> KuhnHistory:
         if self.is_chance():
-            # Action is a deal string like "KQ"
-            return KuhnHistory(cards=(action[0], action[1]), actions=())
-        return KuhnHistory(cards=self._cards, actions=self._actions + (action,))
+            return KuhnHistory(cards=self._rules.decode_deal(action), rules=self._rules)
+        return KuhnHistory(
+            cards=self._cards, actions=self._actions + (action,), rules=self._rules
+        )
+
+    # ------------------------------------------------------------------ views
 
     def to_state_dict(self, viewer: Player | None = None) -> dict:
-        # Compute pot from actions
-        pot = 2  # antes
-        bets = [0, 0]
-        for idx, a in enumerate(self._actions):
-            acting = idx % 2
-            if a == "bet":
-                bets[acting] = 1
-            elif a == "call":
-                bets[acting] = 1
-        pot += sum(bets)
+        n = self._rules.num_players
+        dealt = not self.is_chance()
+        terminal = self.is_terminal()
+        chips, live = self._chips_and_live_seats()
 
         players = []
-        for i in range(2):
+        for seat in range(n):
             card = None
-            if len(self._cards) > i:
-                if viewer is None or viewer == i or self.is_terminal():
-                    card = self._cards[i]
-                else:
-                    card = "?"
+            if dealt:
+                visible = viewer is None or viewer == seat or terminal
+                card = self._cards[seat] if visible else "?"
             players.append({
-                "id": i,
+                "id": seat,
                 "card": card,
                 # Chips this player has put into the pot this hand: ante + bets.
                 # Stacks across hands are match-level state and are injected by
                 # the Match, never invented here — this node must stay pure for
                 # the solver's sake.
-                "committed": 1 + bets[i],
+                "committed": chips[seat],
             })
 
-        action_history = []
-        for idx, a in enumerate(self._actions):
-            action_history.append({"player": idx % 2, "action": a})
-
-        winner = None
-        if self.is_terminal():
-            # Determine winner from utility
-            u0 = self.terminal_utility(0)
-            if u0 > 0:
-                winner = 0
-            else:
-                winner = 1
+        action_history = [
+            {"player": k % n, "action": action} for k, action in enumerate(self._actions)
+        ]
+        in_play = dealt and not terminal
 
         return {
-            "variant": "kuhn",
+            "variant": self.variant,
             "viewer": viewer,  # whose eyes this view is through; None = god mode
             "players": players,
-            "pot": pot,
+            "pot": sum(chips),
             "community_cards": [],
             "action_history": action_history,
-            "legal_actions": self.actions() if not self.is_terminal() and not self.is_chance() else [],
-            "current_player": self.active_player() if not self.is_terminal() and not self.is_chance() else None,
-            "is_terminal": self.is_terminal(),
-            "is_chance": self.is_chance(),
-            "winner": winner,
+            "legal_actions": self.actions() if in_play else [],
+            "current_player": self.active_player() if in_play else None,
+            "is_terminal": terminal,
+            "is_chance": not dealt,
+            "winner": self._winner(live) if terminal else None,
             "round": 0,
         }
 
     def __repr__(self) -> str:
-        cards = "".join(self._cards) if self._cards else "??"
+        separator = self._rules._deal_separator
+        cards = separator.join(self._cards) if self._cards else "??"
         actions = ",".join(self._actions) if self._actions else "-"
         return f"Kuhn({cards}|{actions})"
