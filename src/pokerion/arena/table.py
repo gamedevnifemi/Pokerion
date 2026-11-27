@@ -7,8 +7,8 @@ no part in the result. This module does that for fixed strategies.
 Seats matter in poker, so every result is averaged over all the ways the
 entrants can be seated.
 
-Matches between agents that adapt as they play are not here yet. They will
-reuse this scoring, hand by hand.
+Agents that adapt as they play are scored the same way, one hand at a time,
+in `pokerion.arena.match`.
 """
 
 from __future__ import annotations
@@ -19,16 +19,30 @@ from itertools import permutations
 
 import numpy as np
 
+from pokerion.arena.match import HandView, Seating
 from pokerion.evaluation import best_response
 from pokerion.game.tree import GameTree
 
 
 @dataclass(frozen=True)
 class Entrant:
-    """A named fixed strategy. It plays whichever seat it is given."""
+    """A named fixed strategy. It plays whichever seat it is given.
+
+    It can also sit in a match (see `pokerion.arena.match`), where it plays the
+    same way every hand and learns nothing.
+    """
 
     name: str
     strategy: np.ndarray
+
+    def begin_match(self, tree: GameTree, me: int) -> None:
+        tree.check_strategy(self.strategy)
+
+    def strategy_for(self, seating: Seating) -> np.ndarray:
+        return self.strategy
+
+    def observe(self, hand: HandView) -> None:
+        pass
 
 
 @dataclass(frozen=True)

@@ -55,6 +55,52 @@ def rock(tree: GameTree) -> np.ndarray:
     return prefer(tree, "check", "fold")
 
 
+def random_strategy(tree: GameTree, rng: np.random.Generator) -> np.ndarray:
+    """A strategy drawn at random: at each information set, every way of
+    spreading probability over the legal actions is equally likely.
+
+    With two legal actions the probability of the first is uniform between 0
+    and 1. This is a different bot on every call, unlike `uniform_random`,
+    which is the single strategy that plays every action equally often.
+    """
+    draws = np.where(tree.legal, rng.exponential(size=tree.legal.shape), 0.0)
+    return draws / draws.sum(axis=1, keepdims=True)
+
+
+def perturbed(
+    tree: GameTree, strategy: np.ndarray, spread: float, rng: np.random.Generator
+) -> np.ndarray:
+    """`strategy` with every action probability redrawn close to where it was.
+
+    At an information set with two actions, the first probability is drawn
+    uniformly from the values within `spread` of the original that are still
+    probabilities, and the second is whatever remains. So an action played
+    never, with a spread of 0.2, ends up played between 0 and 20% of the time.
+    With more actions each probability is drawn that way and the row is then
+    rescaled to sum to one.
+
+    ``perturbed(tree, solid, 0.2, rng)`` is a bot that plays close to solid but
+    not quite. It is how Ganzfried and Sandholm (2015) build their
+    "sophisticated static" opponents.
+    """
+    if spread < 0:
+        raise ValueError(f"spread must not be negative, got {spread}")
+    low = np.clip(strategy - spread, 0.0, 1.0)
+    high = np.clip(strategy + spread, 0.0, 1.0)
+    shifted = np.where(tree.legal, rng.uniform(low, high), 0.0)
+
+    two = tree.legal.sum(axis=1) == 2
+    first = tree.legal.argmax(axis=1)  # column of the first legal action in each row
+    rows = np.flatnonzero(two)
+    kept = shifted[rows, first[rows]]
+    shifted[rows] = np.where(tree.legal[rows], (1.0 - kept)[:, None], 0.0)
+    shifted[rows, first[rows]] = kept
+
+    total = shifted.sum(axis=1, keepdims=True)
+    uniform = tree.uniform_strategy()
+    return np.where(total > 0, shifted / np.where(total > 0, total, 1.0), uniform)
+
+
 def blend(first: np.ndarray, second: np.ndarray, weight: float) -> np.ndarray:
     """Mix two strategies at every information set.
 

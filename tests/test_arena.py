@@ -57,6 +57,48 @@ class TestBots:
         with pytest.raises(ValueError, match="between 0 and 1"):
             bots.blend(bots.rock(kuhn), bots.maniac(kuhn), 1.5)
 
+    def test_random_strategy_is_valid_and_different_each_time(self, kuhn3):
+        rng = np.random.default_rng(0)
+        first, second = bots.random_strategy(kuhn3, rng), bots.random_strategy(kuhn3, rng)
+        kuhn3.check_strategy(first)
+        assert not np.allclose(first, second)
+
+    def test_random_strategy_spreads_evenly_between_two_actions(self, kuhn):
+        rng = np.random.default_rng(1)
+        bet = [probability(kuhn, bots.random_strategy(kuhn, rng), "K", "bet") for _ in range(2000)]
+        # Uniform on [0, 1]: mean one half, a quarter of the draws below one quarter.
+        assert np.mean(bet) == pytest.approx(0.5, abs=0.03)
+        assert np.mean(np.array(bet) < 0.25) == pytest.approx(0.25, abs=0.03)
+
+    def test_perturbed_stays_within_the_spread(self, kuhn, kuhn_equilibrium):
+        rng = np.random.default_rng(2)
+        for _ in range(20):
+            moved = bots.perturbed(kuhn, kuhn_equilibrium, 0.2, rng)
+            kuhn.check_strategy(moved)
+            assert np.abs(moved - kuhn_equilibrium).max() <= 0.2 + 1e-12
+
+    def test_perturbed_actually_moves_the_strategy(self, kuhn, kuhn_equilibrium):
+        moved = bots.perturbed(kuhn, kuhn_equilibrium, 0.2, np.random.default_rng(3))
+        assert np.abs(moved - kuhn_equilibrium).max() > 0.05
+
+    def test_perturbed_spreads_an_action_that_is_never_played(self, kuhn):
+        # A rock never bets. Within 0.2 of never is anywhere from 0 to 20% of the time.
+        rng = np.random.default_rng(6)
+        rock = bots.rock(kuhn)
+        bets = [
+            probability(kuhn, bots.perturbed(kuhn, rock, 0.2, rng), "K", "bet") for _ in range(2000)
+        ]
+        assert min(bets) >= 0.0 and max(bets) <= 0.2
+        assert np.mean(bets) == pytest.approx(0.1, abs=0.01)
+
+    def test_perturbed_with_no_spread_changes_nothing(self, kuhn, kuhn_equilibrium):
+        same = bots.perturbed(kuhn, kuhn_equilibrium, 0.0, np.random.default_rng(4))
+        assert np.allclose(same, kuhn_equilibrium)
+
+    def test_perturbed_rejects_a_negative_spread(self, kuhn):
+        with pytest.raises(ValueError, match="spread"):
+            bots.perturbed(kuhn, kuhn.uniform_strategy(), -0.1, np.random.default_rng(5))
+
 
 class TestEvaluateTable:
     def test_winnings_sum_to_zero(self, kuhn3, kuhn3_equilibrium):
