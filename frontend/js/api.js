@@ -53,4 +53,24 @@ const API = {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         return new WebSocket(`${proto}//${location.host}/api/ws/train`);
     },
+
+    // The lab only exists where the server has it switched on (local runs).
+    // Resolves to null when it does not, so the page can leave the tab hidden.
+    async labOptions() {
+        const res = await fetch('/api/lab/options');
+        return res.ok ? res.json() : null;
+    },
+
+    // Plays one match. Resolves to the match, or to { error } with a message.
+    async labMatch(request) {
+        const res = await fetch('/api/lab/match', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request),
+        });
+        const body = await res.json();
+        if (res.ok) return body;
+        const detail = Array.isArray(body.detail) ? body.detail[0]?.msg : body.detail;
+        return { error: body.error || detail || `request failed (${res.status})` };
+    },
 };

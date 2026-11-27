@@ -24,6 +24,15 @@ class History(ABC):
         """Payoff for `player` at a terminal node. Only valid when is_terminal()."""
 
     @abstractmethod
+    def showdown_players(self) -> list[Player]:
+        """Players who turn their private cards over when the hand ends here.
+
+        Only valid when is_terminal(). Empty when the hand ends without a
+        showdown, because everyone else folded. Matches use this to decide
+        what each player is allowed to learn about the others.
+        """
+
+    @abstractmethod
     def active_player(self) -> Player:
         """Which player acts at this node (0-indexed). Not valid at terminal/chance nodes."""
 
