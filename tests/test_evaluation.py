@@ -68,6 +68,51 @@ class TestBestResponse:
         assert response.profile[tree.row("guess"), tree.column("h")] == 1.0
 
 
+class TestBestResponseTies:
+    """Equal actions do not change the value, but the choice between them is still a choice."""
+
+    def chosen(self, tree, response, key):
+        return tree.actions[int(response.profile[tree.row(key)].argmax())]
+
+    def never_bets(self, kuhn):
+        passive = {key: {a: float(a in ("check", "fold")) for a in kuhn.infoset_actions[row]}
+                   for row, key in enumerate(kuhn.infoset_keys)}
+        return kuhn.strategy_from_dict(passive)
+
+    def test_prefer_decides_where_the_player_is_never_reached(self, kuhn):
+        # The opponent never bets, so the first player never faces a bet after checking.
+        table = self.never_bets(kuhn)
+        folds = best_response(kuhn, table, 0, prefer=("fold",))
+        calls = best_response(kuhn, table, 0, prefer=("call",))
+        assert self.chosen(kuhn, folds, "K|check:bet") == "fold"
+        assert self.chosen(kuhn, calls, "K|check:bet") == "call"
+        assert folds.value == pytest.approx(calls.value)
+
+    def test_prefer_does_not_override_a_clearly_better_action(self, kuhn):
+        # Against an opponent that folds to every bet, betting a jack wins and checking it loses.
+        response = best_response(kuhn, self.never_bets(kuhn), 0, prefer=("check",))
+        assert self.chosen(kuhn, response, "J") == "bet"
+
+    def test_tolerance_lets_prefer_choose_among_near_equals(self, kuhn, kuhn_equilibrium):
+        # At equilibrium the first player is indifferent between betting and checking a king.
+        bets = best_response(kuhn, kuhn_equilibrium, 0, prefer=("bet",), tolerance=1e-3)
+        checks = best_response(kuhn, kuhn_equilibrium, 0, prefer=("check",), tolerance=1e-3)
+        assert self.chosen(kuhn, bets, "K") == "bet"
+        assert self.chosen(kuhn, checks, "K") == "check"
+        assert bets.value == pytest.approx(checks.value, abs=1e-2)
+
+    def test_value_is_still_what_the_chosen_response_earns(self, kuhn3):
+        profile = random_strategy(kuhn3, np.random.default_rng(6))
+        response = best_response(kuhn3, profile, 1, prefer=("fold", "check"), tolerance=0.05)
+        exact = best_response(kuhn3, profile, 1)
+        assert response.value == pytest.approx(kuhn3.expected_utilities(response.profile)[1])
+        assert exact.value - 0.05 * 16 <= response.value <= exact.value + 1e-12
+
+    def test_rejects_a_negative_tolerance(self, kuhn):
+        with pytest.raises(ValueError, match="tolerance"):
+            best_response(kuhn, kuhn.uniform_strategy(), 0, tolerance=-1.0)
+
+
 class TestDeviationGains:
     def test_never_negative(self, kuhn3):
         rng = np.random.default_rng(4)

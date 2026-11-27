@@ -23,10 +23,12 @@ something else, so NashConv measures closeness to equilibrium and not safety.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
+from pokerion.common.types import Action
 from pokerion.game.tree import GameTree
 
 
@@ -39,21 +41,48 @@ class BestResponse:
     profile: np.ndarray  # the original profile with this seat's rows replaced by the best response
 
 
-def best_response(tree: GameTree, profile: np.ndarray, player: int) -> BestResponse:
+def best_response(
+    tree: GameTree,
+    profile: np.ndarray,
+    player: int,
+    *,
+    prefer: Sequence[Action] = (),
+    tolerance: float = 0.0,
+) -> BestResponse:
     """The best `player` can do against the rest of `profile`.
 
     The response is deterministic: one action at each of the player's
-    information sets. Ties, and information sets the others never let the
-    player reach, go to the first legal action in column order.
+    information sets. The player cannot tell apart the nodes of one
+    information set, so the action there is chosen for all of them together,
+    each node weighted by how likely chance and the other players make it.
 
-    The player cannot tell apart the nodes of one information set, so the
-    action there is chosen for all of them together, each node weighted by how
-    likely chance and the other players make it.
+    Ties
+    ----
+    Several actions are often equally good. Which of them is chosen does not
+    change the value, but for an agent that learns from what it sees it decides
+    what gets seen next, and that can change the course of a whole match.
+
+    `prefer` names the actions to favour among equals, most favoured first.
+    Actions it does not name come after, in column order. `tolerance` widens
+    what counts as equal: at an information set, any action whose contribution
+    to the player's expected payoff per hand is within `tolerance` of the best
+    one may be chosen. With a positive tolerance the result is only close to a
+    best response, and `value` is what it actually earns.
+
+    Information sets the others never let the player reach are all ties.
     """
     if not tree.infosets_share_depth:
         raise NotImplementedError(
             "best_response needs every node of an information set to sit at the same depth"
         )
+    if tolerance < 0:
+        raise ValueError(f"tolerance must not be negative, got {tolerance}")
+
+    # Lower rank wins a tie: the preferred actions first, then the rest by column.
+    rank = len(prefer) + np.arange(tree.num_actions, dtype=np.float64)
+    for position, action in enumerate(prefer):
+        if action in tree.actions:
+            rank[tree.column(action)] = position
 
     prob = tree.edge_probabilities(profile)
     weight = tree.reach(profile).without(player)
@@ -83,7 +112,9 @@ def best_response(tree: GameTree, profile: np.ndarray, player: int) -> BestRespo
         ).reshape(tree.num_infosets, tree.num_actions)
         action_value[~tree.legal] = -np.inf
         rows = np.unique(slot // tree.num_actions)
-        choice[rows] = action_value[rows].argmax(axis=1)
+        best = action_value[rows].max(axis=1, keepdims=True)
+        as_good = action_value[rows] >= best - tolerance
+        choice[rows] = np.where(as_good, rank, np.inf).argmin(axis=1)
 
         taken = slot % tree.num_actions == choice[slot // tree.num_actions]
         value[parent[mine][taken]] = value[child[mine][taken]]
